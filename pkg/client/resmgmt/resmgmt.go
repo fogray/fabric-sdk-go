@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric/sdkinternal/configtxlator/update"
@@ -998,6 +999,37 @@ func (rc *Client) signAndSubmitChannelConfigTx(channelID string, signingIdentiti
 	return txID, nil
 }
 
+func (rc *Client) SubmitChannelConfigTx(channelID string, configSignatures []*common.ConfigSignature, chConfigTx []byte) (SaveChannelResponse, error) {
+
+	opts, err := rc.prepareRequestOpts()
+	if err != nil {
+		return SaveChannelResponse{}, err
+	}
+
+	orderer, err := rc.requestOrderer(&opts, channelID)
+	if err != nil {
+		return SaveChannelResponse{}, errors.WithMessage(err, "failed to find orderer for request")
+	}
+	chConfig, err := extractChConfigTx(strings.NewReader(string(chConfigTx)))
+	if err != nil {
+		return SaveChannelResponse{}, errors.WithMessage(err, "extracting channel config failed")
+	}
+	request := resource.CreateChannelRequest{
+		Name:       channelID,
+		Orderer:    orderer,
+		Config:     chConfig,
+		Signatures: configSignatures,
+	}
+
+	reqCtx, cancel := rc.createRequestContext(opts, fab.OrdererResponse)
+	defer cancel()
+
+	txID, err := resource.CreateChannel(reqCtx, request, resource.WithRetry(opts.Retry))
+	if err != nil {
+		return SaveChannelResponse{}, errors.WithMessage(err, "create channel failed")
+	}
+	return SaveChannelResponse{TransactionID: txID}, nil
+}
 // CalculateConfigUpdate calculates channel config update based on the difference between provided
 // current channel config and proposed new channel config.
 func CalculateConfigUpdate(channelID string, currentConfig, newConfig *common.Config) (*common.ConfigUpdate, error) {
